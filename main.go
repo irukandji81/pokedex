@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"strings"
@@ -23,6 +24,7 @@ type config struct {
 	Next     string
 	Previous string
 	Commands map[string]cliCommand
+	Pokedex  map[string]struct{}
 }
 
 func main() {
@@ -30,6 +32,7 @@ func main() {
 
 	cfg := &config{
 		Commands: make(map[string]cliCommand),
+		Pokedex:  make(map[string]struct{}),
 	}
 
 	cfg.Commands = map[string]cliCommand{
@@ -66,6 +69,13 @@ func main() {
 			description: "Explore a location area and list Pokémon",
 			callback: func(c *config, args []string) error {
 				return commandExploreWithCache(c, args, cache)
+			},
+		},
+		"catch": {
+			name:        "catch",
+			description: "Attempt to catch a Pokémon by name",
+			callback: func(c *config, args []string) error {
+				return commandCatchWithCache(c, args, cache)
 			},
 		},
 	}
@@ -301,6 +311,60 @@ func displayPokemonFromResponse(data []byte) error {
 	fmt.Println("Found Pokémon:")
 	for _, encounter := range result.PokemonEncounters {
 		fmt.Printf(" - %s\n", encounter.Pokemon.Name)
+	}
+	return nil
+}
+
+func commandCatchWithCache(cfg *config, args []string, cache *pokecache.Cache) error {
+	if len(args) < 1 {
+		return fmt.Errorf("you must specify a Pokémon to catch")
+	}
+
+	pokemonName := strings.ToLower(args[0])
+	apiURL := fmt.Sprintf("https://pokeapi.co/api/v2/pokemon/%s", pokemonName)
+
+	fmt.Printf("Throwing a Pokeball at %s...\n", pokemonName)
+
+	if val, found := cache.Get(apiURL); found {
+		return determineCatchResult(cfg, pokemonName, val)
+	}
+
+	response, err := http.Get(apiURL)
+	if err != nil {
+		return fmt.Errorf("failed to fetch data: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %v", err)
+	}
+
+	cache.Add(apiURL, body)
+	return determineCatchResult(cfg, pokemonName, body)
+}
+
+func determineCatchResult(cfg *config, pokemonName string, data []byte) error {
+	var result struct {
+		BaseExperience int `json:"base_experience"`
+	}
+
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("failed to parse Pokémon data: %v", err)
+	}
+
+	chance := 100.0 / float64(result.BaseExperience)
+	caught := rand.Float64() < chance
+
+	if caught {
+		cfg.Pokedex[pokemonName] = struct{}{}
+		fmt.Printf("%s was caught!\n", pokemonName)
+	} else {
+		fmt.Printf("%s escaped!\n", pokemonName)
 	}
 	return nil
 }
