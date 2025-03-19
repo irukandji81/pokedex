@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand/v2"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -24,15 +24,24 @@ type config struct {
 	Next     string
 	Previous string
 	Commands map[string]cliCommand
-	Pokedex  map[string]struct{}
+	Pokedex  map[string]pokemonData
+}
+
+type pokemonData struct {
+	Name   string
+	Height int
+	Weight int
+	Stats  map[string]int
+	Types  []string
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	cache := pokecache.NewCache(5 * time.Second)
 
 	cfg := &config{
 		Commands: make(map[string]cliCommand),
-		Pokedex:  make(map[string]struct{}),
+		Pokedex:  make(map[string]pokemonData),
 	}
 
 	cfg.Commands = map[string]cliCommand{
@@ -76,6 +85,13 @@ func main() {
 			description: "Attempt to catch a Pokémon by name",
 			callback: func(c *config, args []string) error {
 				return commandCatchWithCache(c, args, cache)
+			},
+		},
+		"inspect": {
+			name:        "inspect",
+			description: "Inspect a caught Pokémon's details",
+			callback: func(c *config, args []string) error {
+				return commandInspect(c, args)
 			},
 		},
 	}
@@ -350,7 +366,21 @@ func commandCatchWithCache(cfg *config, args []string, cache *pokecache.Cache) e
 
 func determineCatchResult(cfg *config, pokemonName string, data []byte) error {
 	var result struct {
-		BaseExperience int `json:"base_experience"`
+		Name           string `json:"name"`
+		Height         int    `json:"height"`
+		Weight         int    `json:"weight"`
+		BaseExperience int    `json:"base_experience"`
+		Stats          []struct {
+			Stat struct {
+				Name string `json:"name"`
+			} `json:"stat"`
+			BaseStat int `json:"base_stat"`
+		} `json:"stats"`
+		Types []struct {
+			Type struct {
+				Name string `json:"name"`
+			} `json:"type"`
+		} `json:"types"`
 	}
 
 	if err := json.Unmarshal(data, &result); err != nil {
@@ -361,10 +391,52 @@ func determineCatchResult(cfg *config, pokemonName string, data []byte) error {
 	caught := rand.Float64() < chance
 
 	if caught {
-		cfg.Pokedex[pokemonName] = struct{}{}
+		stats := make(map[string]int)
+		for _, stat := range result.Stats {
+			stats[stat.Stat.Name] = stat.BaseStat
+		}
+
+		types := []string{}
+		for _, t := range result.Types {
+			types = append(types, t.Type.Name)
+		}
+
+		cfg.Pokedex[pokemonName] = pokemonData{
+			Name:   result.Name,
+			Height: result.Height,
+			Weight: result.Weight,
+			Stats:  stats,
+			Types:  types,
+		}
+
 		fmt.Printf("%s was caught!\n", pokemonName)
 	} else {
 		fmt.Printf("%s escaped!\n", pokemonName)
 	}
+	return nil
+}
+
+func commandInspect(cfg *config, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("you must specify a Pokémon to inspect")
+	}
+
+	pokemonName := strings.ToLower(args[0])
+	if data, found := cfg.Pokedex[pokemonName]; found {
+		fmt.Printf("Name: %s\n", data.Name)
+		fmt.Printf("Height: %d\n", data.Height)
+		fmt.Printf("Weight: %d\n", data.Weight)
+		fmt.Println("Stats:")
+		for stat, value := range data.Stats {
+			fmt.Printf("  -%s: %d\n", stat, value)
+		}
+		fmt.Println("Types:")
+		for _, t := range data.Types {
+			fmt.Printf("  - %s\n", t)
+		}
+	} else {
+		fmt.Println("you have not caught that Pokémon")
+	}
+
 	return nil
 }
