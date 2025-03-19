@@ -94,6 +94,13 @@ func main() {
 				return commandInspect(c, args)
 			},
 		},
+		"pokedex": {
+			name:        "pokedex",
+			description: "List all the Pokémon you have caught",
+			callback: func(c *config, args []string) error {
+				return commandPokedex(c, args)
+			},
+		},
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -438,5 +445,18 @@ func commandInspect(cfg *config, args []string) error {
 		fmt.Println("you have not caught that Pokémon")
 	}
 
+	return nil
+}
+
+func commandPokedex(cfg *config, args []string) error {
+	if len(cfg.Pokedex) == 0 {
+		fmt.Println("Your Pokedex is empty. Go catch some Pokémon!")
+		return nil
+	}
+
+	fmt.Println("Your Pokedex:")
+	for pokemon := range cfg.Pokedex {
+		fmt.Printf(" - %s\n", pokemon)
+	}
 	return nil
 }
