@@ -26,6 +26,7 @@ type config struct {
 	Previous string
 	Commands map[string]cliCommand
 	Pokedex  map[string]pokemonData
+	Current  string
 }
 
 type pokemonData struct {
@@ -84,9 +85,9 @@ func main() {
 		},
 		"explore": {
 			name:        "explore",
-			description: "Explore a location area and list Pokémon",
+			description: "Interactively explore locations by navigating left or right",
 			callback: func(c *config, args []string) error {
-				return commandExploreWithCache(c, args, cache)
+				return commandExploreInteractive(c, args, cache)
 			},
 		},
 		"catch": {
@@ -320,20 +321,18 @@ func commandMapBackWithCache(cfg *config, cache *pokecache.Cache) error {
 	return nil
 }
 
-func commandExploreWithCache(cfg *config, args []string, cache *pokecache.Cache) error {
-	if len(args) < 1 {
-		return fmt.Errorf("you must specify a location area to explore")
+func commandExploreInteractive(cfg *config, args []string, cache *pokecache.Cache) error {
+	if cfg.Current == "" {
+		cfg.Current = "https://pokeapi.co/api/v2/location-area?limit=20"
 	}
 
-	locationArea := args[0]
-	apiURL := fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%s", locationArea)
-
-	if val, found := cache.Get(apiURL); found {
+	// Fetch data for the current location
+	if val, found := cache.Get(cfg.Current); found {
 		fmt.Println("Using cached data")
-		return displayPokemonFromResponse(val)
+		return displayNavigationChoices(cfg, val, cache)
 	}
 
-	response, err := http.Get(apiURL)
+	response, err := http.Get(cfg.Current)
 	if err != nil {
 		return fmt.Errorf("failed to fetch data: %v", err)
 	}
@@ -348,8 +347,8 @@ func commandExploreWithCache(cfg *config, args []string, cache *pokecache.Cache)
 		return fmt.Errorf("failed to read response: %v", err)
 	}
 
-	cache.Add(apiURL, body)
-	return displayPokemonFromResponse(body)
+	cache.Add(cfg.Current, body)
+	return displayNavigationChoices(cfg, body, cache)
 }
 
 func displayPokemonFromResponse(data []byte) error {
@@ -544,5 +543,44 @@ func loadPokedexFromFile(cfg *config, filename string) error {
 	}
 
 	fmt.Println("Pokedex loaded successfully!")
+	return nil
+}
+
+func displayNavigationChoices(cfg *config, data []byte, cache *pokecache.Cache) error {
+	var result struct {
+		Results []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"results"`
+		Next     string `json:"next"`
+		Previous string `json:"previous"`
+	}
+
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	cfg.Next = result.Next
+	cfg.Previous = result.Previous
+
+	fmt.Println("Where would you like to go next?")
+	if cfg.Previous != "" {
+		fmt.Println(" - Type 'left' to go to the previous location.")
+	}
+	if cfg.Next != "" {
+		fmt.Println(" - Type 'right' to go to the next location.")
+	}
+
+	var choice string
+	fmt.Print("> ")
+	fmt.Scanln(&choice)
+
+	if choice == "left" && cfg.Previous != "" {
+		cfg.Current = cfg.Previous
+	} else if choice == "right" && cfg.Next != "" {
+		cfg.Current = cfg.Next
+	} else {
+		fmt.Println("Invalid choice. Please type 'left' or 'right'.")
+	}
 	return nil
 }
