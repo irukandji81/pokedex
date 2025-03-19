@@ -46,8 +46,9 @@ func main() {
 		Pokedex:  make(map[string]pokemonData),
 	}
 
-	const pokedexFile = "pokedex.json"
-	const historyFile = ".pokedex_history"
+	const logDirectory = "logs/"
+	const pokedexFile = logDirectory + "pokedex.json"
+	const historyFile = logDirectory + ".pokedex_history"
 
 	if err := loadPokedexFromFile(cfg, pokedexFile); err != nil {
 		fmt.Printf("Error loading Pokedex: %v\n", err)
@@ -115,7 +116,7 @@ func main() {
 	// Set up readline for command history
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          "Pokedex > ",
-		HistoryFile:     ".pokedex_history",
+		HistoryFile:     historyFile,
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 	})
