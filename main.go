@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +11,8 @@ import (
 	"time"
 
 	"github.com/irukandji81/pokedex/internal/pokecache"
+
+	"github.com/chzyer/readline"
 )
 
 type cliCommand struct {
@@ -45,6 +46,8 @@ func main() {
 		Commands: make(map[string]cliCommand),
 		Pokedex:  make(map[string]pokemonData),
 	}
+
+	const pokedexFile = "pokedex.json"
 
 	if err := loadPokedexFromFile(cfg, pokedexFile); err != nil {
 		fmt.Printf("Error loading Pokedex: %v\n", err)
@@ -109,17 +112,33 @@ func main() {
 		},
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
+	// Set up readline for command history
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "Pokedex > ",
+		HistoryFile:     ".pokedex_history", // Saves command history to this file
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		fmt.Printf("Error initializing readline: %v\n", err)
+		return
+	}
+	defer rl.Close()
 
+	//REPL Loop
 	for {
-		fmt.Print("Pokedex > ")
-
-		if !scanner.Scan() {
+		line, err := rl.Readline()
+		if err == readline.ErrInterrupt { // Handle Ctrl+C gracefully
+			if len(line) == 0 {
+				break
+			}
+			continue
+		} else if err == io.EOF { // Handle EOF (Ctrl+D)
 			break
 		}
 
-		input := scanner.Text()
-		words := cleanInput(input)
+		// Clean and process the input
+		words := cleanInput(line)
 
 		if len(words) == 0 {
 			continue
