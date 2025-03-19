@@ -4,9 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/irukandji81/pokedex/internal/pokecache"
 )
 
 type cliCommand struct {
@@ -22,6 +26,8 @@ type config struct {
 }
 
 func main() {
+	cache := pokecache.NewCache(5 * time.Second)
+
 	cfg := &config{
 		Commands: make(map[string]cliCommand),
 	}
@@ -42,12 +48,16 @@ func main() {
 		"map": {
 			name:        "map",
 			description: "Display the next 20 locations",
-			callback:    commandMap,
+			callback: func(c *config) error {
+				return commandMapWithCache(c, cache)
+			},
 		},
 		"mapb": {
 			name:        "mapb",
 			description: "Display the previous 20 locations",
-			callback:    commandMapBack,
+			callback: func(c *config) error {
+				return commandMapBackWithCache(c, cache)
+			},
 		},
 	}
 
@@ -101,9 +111,29 @@ func commandHelp(cfg *config) error {
 	return nil
 }
 
-func commandMap(cfg *config) error {
+func commandMapWithCache(cfg *config, cache *pokecache.Cache) error {
 	if cfg.Next == "" {
 		cfg.Next = "https://pokeapi.co/api/v2/location-area?limit=20"
+	}
+
+	if val, found := cache.Get(cfg.Next); found {
+		fmt.Println("Using cached data")
+		var data struct {
+			Results []struct {
+				Name string `json:"name"`
+			} `json:"results"`
+			Next     string `json:"next"`
+			Previous string `json:"previous"`
+		}
+		if err := json.Unmarshal(val, &data); err != nil {
+			return fmt.Errorf("failed to decode cached response: %v", err)
+		}
+		for _, location := range data.Results {
+			fmt.Println(location.Name)
+		}
+		cfg.Next = data.Next
+		cfg.Previous = data.Previous
+		return nil
 	}
 
 	response, err := http.Get(cfg.Next)
@@ -124,7 +154,14 @@ func commandMap(cfg *config) error {
 		Previous string `json:"previous"`
 	}
 
-	if err := json.NewDecoder(response.Body).Decode(&data); err != nil {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %v", err)
+	}
+
+	cache.Add(cfg.Next, body)
+
+	if err := json.Unmarshal(body, &data); err != nil {
 		return fmt.Errorf("failed to decode response: %v", err)
 	}
 
@@ -137,9 +174,29 @@ func commandMap(cfg *config) error {
 	return nil
 }
 
-func commandMapBack(cfg *config) error {
+func commandMapBackWithCache(cfg *config, cache *pokecache.Cache) error {
 	if cfg.Previous == "" {
 		fmt.Println("you're on the first page")
+		return nil
+	}
+
+	if val, found := cache.Get(cfg.Previous); found {
+		fmt.Println("Using cached data")
+		var data struct {
+			Results []struct {
+				Name string `json:"name"`
+			} `json:"results"`
+			Next     string `json:"next"`
+			Previous string `json:"previous"`
+		}
+		if err := json.Unmarshal(val, &data); err != nil {
+			return fmt.Errorf("failed to decode cached response: %v", err)
+		}
+		for _, location := range data.Results {
+			fmt.Println(location.Name)
+		}
+		cfg.Next = data.Next
+		cfg.Previous = data.Previous
 		return nil
 	}
 
@@ -161,7 +218,14 @@ func commandMapBack(cfg *config) error {
 		Previous string `json:"previous"`
 	}
 
-	if err := json.NewDecoder(response.Body).Decode(&data); err != nil {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %v", err)
+	}
+
+	cache.Add(cfg.Previous, body)
+
+	if err := json.Unmarshal(body, &data); err != nil {
 		return fmt.Errorf("failed to decode response: %v", err)
 	}
 
