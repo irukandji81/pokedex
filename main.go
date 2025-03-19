@@ -35,6 +35,8 @@ type pokemonData struct {
 	Types  []string
 }
 
+const pokedexFile = "pokedex.json"
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	cache := pokecache.NewCache(5 * time.Second)
@@ -42,6 +44,10 @@ func main() {
 	cfg := &config{
 		Commands: make(map[string]cliCommand),
 		Pokedex:  make(map[string]pokemonData),
+	}
+
+	if err := loadPokedexFromFile(cfg, pokedexFile); err != nil {
+		fmt.Printf("Error loading Pokedex: %v\n", err)
 	}
 
 	cfg.Commands = map[string]cliCommand{
@@ -130,6 +136,14 @@ func main() {
 			fmt.Println("Unknown command")
 		}
 	}
+
+	// Save the Pokedex to file when exiting the program
+	fmt.Println("Attempting to save Pokedex before exit...") // Debug statement
+	if err := savePokedexToFile(cfg, pokedexFile); err != nil {
+		fmt.Printf("Error saving Pokedex: %v\n", err)
+	} else {
+		fmt.Println("Pokedex saved successfully!")
+	}
 }
 
 func cleanInput(text string) []string {
@@ -141,6 +155,12 @@ func cleanInput(text string) []string {
 
 func commandExit(cfg *config) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
+	// Explicitly save the Pokedex before exiting
+	const pokedexFile = "pokedex.json"
+	if err := savePokedexToFile(cfg, pokedexFile); err != nil {
+		fmt.Printf("Error saving Pokedex: %v\n", err)
+	}
+	// Terminate the program after saving
 	os.Exit(0)
 	return nil
 }
@@ -458,5 +478,52 @@ func commandPokedex(cfg *config, args []string) error {
 	for pokemon := range cfg.Pokedex {
 		fmt.Printf(" - %s\n", pokemon)
 	}
+	return nil
+}
+
+func savePokedexToFile(cfg *config, filename string) error {
+	// Convert the Pokedex map to pretty-printed JSON
+	prettyJSON, err := json.MarshalIndent(cfg.Pokedex, "", "    ")
+	if err != nil {
+		fmt.Printf("Error formatting Pokedex: %v\n", err)
+		return fmt.Errorf("failed to format Pokedex: %v", err)
+	}
+
+	// Create or overwrite the file
+	file, err := os.Create(filename)
+	if err != nil {
+		fmt.Printf("Error creating file: %v\n", err)
+		return fmt.Errorf("failed to create file: %v", err)
+	}
+	defer file.Close()
+
+	// Write the pretty-printed JSON to the file
+	_, err = file.Write(prettyJSON)
+	if err != nil {
+		fmt.Printf("Error writing to file: %v\n", err)
+		return fmt.Errorf("failed to write to file: %v", err)
+	}
+
+	fmt.Println("Pokedex saved successfully!")
+	return nil
+}
+
+func loadPokedexFromFile(cfg *config, filename string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No saved Pokedex found. Starting fresh!")
+			return nil
+		}
+		return fmt.Errorf("failed to open file: %v", err)
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&cfg.Pokedex); err != nil {
+		return fmt.Errorf("failed to decode Pokedex: %v", err)
+	}
+
+	fmt.Println("Pokedex loaded successfully!")
 	return nil
 }
