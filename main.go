@@ -16,7 +16,7 @@ import (
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*config) error
+	callback    func(*config, []string) error
 }
 
 type config struct {
@@ -36,27 +36,36 @@ func main() {
 		"exit": {
 			name:        "exit",
 			description: "Exit the Pokedex",
-			callback:    commandExit,
+			callback: func(c *config, args []string) error {
+				return commandExit(c)
+			},
 		},
 		"help": {
 			name:        "help",
 			description: "Displays a help message",
-			callback: func(c *config) error {
+			callback: func(c *config, args []string) error {
 				return commandHelp(c)
 			},
 		},
 		"map": {
 			name:        "map",
 			description: "Display the next 20 locations",
-			callback: func(c *config) error {
+			callback: func(c *config, args []string) error {
 				return commandMapWithCache(c, cache)
 			},
 		},
 		"mapb": {
 			name:        "mapb",
 			description: "Display the previous 20 locations",
-			callback: func(c *config) error {
+			callback: func(c *config, args []string) error {
 				return commandMapBackWithCache(c, cache)
+			},
+		},
+		"explore": {
+			name:        "explore",
+			description: "Explore a location area and list Pokémon",
+			callback: func(c *config, args []string) error {
+				return commandExploreWithCache(c, args, cache)
 			},
 		},
 	}
@@ -78,9 +87,10 @@ func main() {
 		}
 
 		command := words[0]
+		args := words[1:]
 
 		if cmd, found := cfg.Commands[command]; found {
-			if err := cmd.callback(cfg); err != nil {
+			if err := cmd.callback(cfg, args); err != nil {
 				fmt.Printf("Error: %v\n", err)
 			}
 		} else {
@@ -235,5 +245,62 @@ func commandMapBackWithCache(cfg *config, cache *pokecache.Cache) error {
 
 	cfg.Next = data.Next
 	cfg.Previous = data.Previous
+	return nil
+}
+
+func commandExploreWithCache(cfg *config, args []string, cache *pokecache.Cache) error {
+	if len(args) < 1 {
+		return fmt.Errorf("you must specify a location area to explore")
+	}
+
+	locationArea := args[0]
+	apiURL := fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%s", locationArea)
+
+	if val, found := cache.Get(apiURL); found {
+		fmt.Println("Using cached data")
+		return displayPokemonFromResponse(val)
+	}
+
+	response, err := http.Get(apiURL)
+	if err != nil {
+		return fmt.Errorf("failed to fetch data: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %v", err)
+	}
+
+	cache.Add(apiURL, body)
+	return displayPokemonFromResponse(body)
+}
+
+func displayPokemonFromResponse(data []byte) error {
+	var result struct {
+		PokemonEncounters []struct {
+			Pokemon struct {
+				Name string `json:"name"`
+			} `json:"pokemon"`
+		} `json:"pokemon_encounters"`
+	}
+
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	if len(result.PokemonEncounters) == 0 {
+		fmt.Println("No Pokémon found in this area!")
+		return nil
+	}
+
+	fmt.Println("Found Pokémon:")
+	for _, encounter := range result.PokemonEncounters {
+		fmt.Printf(" - %s\n", encounter.Pokemon.Name)
+	}
 	return nil
 }
