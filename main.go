@@ -37,8 +37,6 @@ type pokemonData struct {
 	Types  []string
 }
 
-const pokedexFile = "pokedex.json"
-
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	cache := pokecache.NewCache(5 * time.Second)
@@ -49,6 +47,7 @@ func main() {
 	}
 
 	const pokedexFile = "pokedex.json"
+	const historyFile = ".pokedex_history"
 
 	if err := loadPokedexFromFile(cfg, pokedexFile); err != nil {
 		fmt.Printf("Error loading Pokedex: %v\n", err)
@@ -116,7 +115,7 @@ func main() {
 	// Set up readline for command history
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          "Pokedex > ",
-		HistoryFile:     ".pokedex_history", // Saves command history to this file
+		HistoryFile:     ".pokedex_history",
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 	})
@@ -128,17 +127,18 @@ func main() {
 
 	//REPL Loop
 	for {
+		fmt.Print("Pokedex > ")
+
 		line, err := rl.Readline()
-		if err == readline.ErrInterrupt { // Handle Ctrl+C gracefully
+		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
 				break
 			}
 			continue
-		} else if err == io.EOF { // Handle EOF (Ctrl+D)
+		} else if err == io.EOF {
 			break
 		}
 
-		// Clean and process the input
 		words := cleanInput(line)
 
 		if len(words) == 0 {
@@ -150,6 +150,10 @@ func main() {
 
 		if cmd, found := cfg.Commands[command]; found {
 			if err := cmd.callback(cfg, args); err != nil {
+				// Handle the "exit" signal
+				if err.Error() == "exit" {
+					break
+				}
 				fmt.Printf("Error: %v\n", err)
 			}
 		} else {
@@ -158,11 +162,18 @@ func main() {
 	}
 
 	// Save the Pokedex to file when exiting the program
-	fmt.Println("Attempting to save Pokedex before exit...") // Debug statement
 	if err := savePokedexToFile(cfg, pokedexFile); err != nil {
 		fmt.Printf("Error saving Pokedex: %v\n", err)
 	} else {
 		fmt.Println("Pokedex saved successfully!")
+	}
+
+	// Clear the history file
+	file, err := os.OpenFile(historyFile, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	if err != nil {
+		fmt.Printf("Error clearing command history: %v\n", err)
+	} else {
+		file.Close()
 	}
 }
 
@@ -175,14 +186,7 @@ func cleanInput(text string) []string {
 
 func commandExit(cfg *config) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
-	// Explicitly save the Pokedex before exiting
-	const pokedexFile = "pokedex.json"
-	if err := savePokedexToFile(cfg, pokedexFile); err != nil {
-		fmt.Printf("Error saving Pokedex: %v\n", err)
-	}
-	// Terminate the program after saving
-	os.Exit(0)
-	return nil
+	return fmt.Errorf("exit") // A special error to indicate program termination
 }
 
 func commandHelp(cfg *config) error {
@@ -521,8 +525,6 @@ func savePokedexToFile(cfg *config, filename string) error {
 		fmt.Printf("Error writing to file: %v\n", err)
 		return fmt.Errorf("failed to write to file: %v", err)
 	}
-
-	fmt.Println("Pokedex saved successfully!")
 	return nil
 }
 
